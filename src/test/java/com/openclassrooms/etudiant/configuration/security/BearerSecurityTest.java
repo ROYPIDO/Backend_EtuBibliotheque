@@ -33,7 +33,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Vérifie la protection Bearer JWT. La route /api/students n'existe pas encore :
+ * Vérifie la protection Bearer JWT sur une route volontairement inexistante :
  * un 404 signifie que la sécurité a laissé passer la requête, un 401 qu'elle l'a bloquée.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -41,7 +41,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Testcontainers
 public class BearerSecurityTest {
 
-    private static final String PROTECTED_URL = "/api/students";
+    private static final String PROTECTED_URL = "/api/route-that-does-not-exist";
     // Clés jetables de test (jamais la vraie clé du .env)
     private static final String TEST_SECRET = Base64.getEncoder().encodeToString(new byte[32]);
     private static final String OTHER_SECRET = Base64.getEncoder().encodeToString(new byte[]{
