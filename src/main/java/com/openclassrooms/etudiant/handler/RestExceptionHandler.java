@@ -3,6 +3,7 @@ package com.openclassrooms.etudiant.handler;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -10,7 +11,6 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
-import java.nio.file.AccessDeniedException;
 import java.time.LocalDateTime;
 
 @RestControllerAdvice
@@ -24,6 +24,24 @@ public class RestExceptionHandler extends ResponseEntityExceptionHandler {
                 HttpStatus.BAD_REQUEST, request);
     }
 
+
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    @ExceptionHandler(value = {ResourceNotFoundException.class})
+    protected ResponseEntity<Object> handleResourceNotFoundException(ResourceNotFoundException resourceNotFoundException,
+                                                                     WebRequest request) {
+        logError(resourceNotFoundException);
+        return handleExceptionInternal(resourceNotFoundException, getErrorDetails(resourceNotFoundException, request),
+                new HttpHeaders(), HttpStatus.NOT_FOUND, request);
+    }
+
+    @ResponseStatus(HttpStatus.CONFLICT)
+    @ExceptionHandler(value = {EmailAlreadyUsedException.class})
+    protected ResponseEntity<Object> handleEmailAlreadyUsedException(EmailAlreadyUsedException emailAlreadyUsedException,
+                                                                     WebRequest request) {
+        logError(emailAlreadyUsedException);
+        return handleExceptionInternal(emailAlreadyUsedException, getErrorDetails(emailAlreadyUsedException, request),
+                new HttpHeaders(), HttpStatus.CONFLICT, request);
+    }
 
     @ResponseStatus(HttpStatus.UNAUTHORIZED)
     @ExceptionHandler(value = {BadCredentialsException.class})
