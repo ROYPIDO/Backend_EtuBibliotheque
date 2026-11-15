@@ -1,5 +1,7 @@
 package com.openclassrooms.etudiant.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.openclassrooms.etudiant.dto.StudentRequestDTO;
 import com.openclassrooms.etudiant.entities.Student;
 import com.openclassrooms.etudiant.entities.User;
 import com.openclassrooms.etudiant.repository.StudentRepository;
@@ -20,8 +22,15 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.Base64;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -46,6 +55,8 @@ public class StudentControllerTest {
     private StudentRepository studentRepository;
     @Autowired
     private JwtService jwtService;
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @DynamicPropertySource
     static void configureTestProperties(DynamicPropertyRegistry registry) {
@@ -181,5 +192,263 @@ public class StudentControllerTest {
 
         mockMvc.perform(get(URL + "/" + saved.getId()).header(HttpHeaders.AUTHORIZATION, bearerSignedWithOtherKey()))
                 .andExpect(status().isUnauthorized());
+    }
+
+    // ---------- POST /api/students ----------
+
+    private String body(String firstName, String lastName, String email) throws Exception {
+        StudentRequestDTO dto = new StudentRequestDTO();
+        dto.setFirstName(firstName);
+        dto.setLastName(lastName);
+        dto.setEmail(email);
+        return objectMapper.writeValueAsString(dto);
+    }
+
+    @Test
+    public void createWithValidTokenReturnsCreatedAndPersistsStudent() throws Exception {
+        mockMvc.perform(post(URL)
+                        .header(HttpHeaders.AUTHORIZATION, validBearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("Alice", "Martin", "alice@example.com")))
+                .andExpect(status().isCreated())
+                .andExpect(header().string(HttpHeaders.LOCATION, containsString(URL + "/")))
+                .andExpect(jsonPath("$.id").exists())
+                .andExpect(jsonPath("$.firstName").value("Alice"))
+                .andExpect(jsonPath("$.lastName").value("Martin"))
+                .andExpect(jsonPath("$.email").value("alice@example.com"))
+                .andExpect(jsonPath("$.createdAt").exists())
+                .andExpect(jsonPath("$.updatedAt").exists());
+
+        assertThat(studentRepository.findByEmail("alice@example.com")).isPresent();
+    }
+
+    @Test
+    public void createIgnoresIdSentByClient() throws Exception {
+        String json = "{\"id\":9999,\"firstName\":\"Alice\",\"lastName\":\"Martin\",\"email\":\"alice@example.com\"}";
+
+        mockMvc.perform(post(URL)
+                        .header(HttpHeaders.AUTHORIZATION, validBearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(not(9999)));
+    }
+
+    @Test
+    public void createWithMissingFieldsReturnsBadRequest() throws Exception {
+        mockMvc.perform(post(URL)
+                        .header(HttpHeaders.AUTHORIZATION, validBearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+
+        assertThat(studentRepository.count()).isZero();
+    }
+
+    @Test
+    public void createWithInvalidEmailReturnsBadRequest() throws Exception {
+        mockMvc.perform(post(URL)
+                        .header(HttpHeaders.AUTHORIZATION, validBearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("Alice", "Martin", "not-an-email")))
+                .andExpect(status().isBadRequest());
+
+        assertThat(studentRepository.count()).isZero();
+    }
+
+    @Test
+    public void createWithDuplicateEmailReturnsConflict() throws Exception {
+        saveStudent("Alice", "Martin", "alice@example.com");
+
+        mockMvc.perform(post(URL)
+                        .header(HttpHeaders.AUTHORIZATION, validBearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("Other", "Person", "alice@example.com")))
+                .andExpect(status().isConflict());
+
+        assertThat(studentRepository.count()).isEqualTo(1);
+    }
+
+    @Test
+    public void createWithoutTokenReturnsUnauthorized() throws Exception {
+        mockMvc.perform(post(URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("Alice", "Martin", "alice@example.com")))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(studentRepository.count()).isZero();
+    }
+
+    @Test
+    public void createWithMalformedTokenReturnsUnauthorized() throws Exception {
+        mockMvc.perform(post(URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("Alice", "Martin", "alice@example.com")))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    public void createWithTokenSignedByAnotherKeyReturnsUnauthorized() throws Exception {
+        mockMvc.perform(post(URL)
+                        .header(HttpHeaders.AUTHORIZATION, bearerSignedWithOtherKey())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("Alice", "Martin", "alice@example.com")))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(studentRepository.count()).isZero();
+    }
+
+    // ---------- PUT /api/students/{id} ----------
+
+    @Test
+    public void updateWithValidTokenReturnsOkAndPreservesIdAndCreatedAt() throws Exception {
+        Student saved = saveStudent("Alice", "Martin", "alice@example.com");
+
+        mockMvc.perform(put(URL + "/" + saved.getId())
+                        .header(HttpHeaders.AUTHORIZATION, validBearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("Alicia", "Durand", "alicia@example.com")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(saved.getId()))
+                .andExpect(jsonPath("$.firstName").value("Alicia"))
+                .andExpect(jsonPath("$.lastName").value("Durand"))
+                .andExpect(jsonPath("$.email").value("alicia@example.com"));
+
+        Student reloaded = studentRepository.findById(saved.getId()).orElseThrow();
+        assertThat(reloaded.getFirstName()).isEqualTo("Alicia");
+        assertThat(reloaded.getCreatedAt()).isEqualTo(saved.getCreatedAt());
+    }
+
+    @Test
+    public void updateKeepingOwnEmailReturnsOk() throws Exception {
+        Student saved = saveStudent("Alice", "Martin", "alice@example.com");
+
+        mockMvc.perform(put(URL + "/" + saved.getId())
+                        .header(HttpHeaders.AUTHORIZATION, validBearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("Alicia", "Martin", "alice@example.com")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("Alicia"));
+    }
+
+    @Test
+    public void updateWithEmailOfAnotherStudentReturnsConflict() throws Exception {
+        Student alice = saveStudent("Alice", "Martin", "alice@example.com");
+        saveStudent("Bob", "Dupont", "bob@example.com");
+
+        mockMvc.perform(put(URL + "/" + alice.getId())
+                        .header(HttpHeaders.AUTHORIZATION, validBearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("Alice", "Martin", "bob@example.com")))
+                .andExpect(status().isConflict());
+
+        assertThat(studentRepository.findById(alice.getId()).orElseThrow().getEmail())
+                .isEqualTo("alice@example.com");
+    }
+
+    @Test
+    public void updateUnknownStudentReturnsNotFound() throws Exception {
+        mockMvc.perform(put(URL + "/999999")
+                        .header(HttpHeaders.AUTHORIZATION, validBearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("Alice", "Martin", "alice@example.com")))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    public void updateWithInvalidDataReturnsBadRequest() throws Exception {
+        Student saved = saveStudent("Alice", "Martin", "alice@example.com");
+
+        mockMvc.perform(put(URL + "/" + saved.getId())
+                        .header(HttpHeaders.AUTHORIZATION, validBearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("", "Martin", "alice@example.com")))
+                .andExpect(status().isBadRequest());
+
+        assertThat(studentRepository.findById(saved.getId()).orElseThrow().getFirstName()).isEqualTo("Alice");
+    }
+
+    @Test
+    public void updateWithoutTokenReturnsUnauthorized() throws Exception {
+        Student saved = saveStudent("Alice", "Martin", "alice@example.com");
+
+        mockMvc.perform(put(URL + "/" + saved.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("Alicia", "Durand", "alicia@example.com")))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(studentRepository.findById(saved.getId()).orElseThrow().getFirstName()).isEqualTo("Alice");
+    }
+
+    @Test
+    public void updateWithMalformedTokenReturnsUnauthorized() throws Exception {
+        Student saved = saveStudent("Alice", "Martin", "alice@example.com");
+
+        mockMvc.perform(put(URL + "/" + saved.getId())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("Alicia", "Durand", "alicia@example.com")))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    public void updateWithTokenSignedByAnotherKeyReturnsUnauthorized() throws Exception {
+        Student saved = saveStudent("Alice", "Martin", "alice@example.com");
+
+        mockMvc.perform(put(URL + "/" + saved.getId())
+                        .header(HttpHeaders.AUTHORIZATION, bearerSignedWithOtherKey())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body("Alicia", "Durand", "alicia@example.com")))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ---------- DELETE /api/students/{id} ----------
+
+    @Test
+    public void deleteWithValidTokenReturnsNoContentAndRemovesStudent() throws Exception {
+        Student saved = saveStudent("Alice", "Martin", "alice@example.com");
+
+        mockMvc.perform(delete(URL + "/" + saved.getId()).header(HttpHeaders.AUTHORIZATION, validBearer()))
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+
+        assertThat(studentRepository.existsById(saved.getId())).isFalse();
+    }
+
+    @Test
+    public void deleteUnknownStudentReturnsNotFound() throws Exception {
+        mockMvc.perform(delete(URL + "/999999").header(HttpHeaders.AUTHORIZATION, validBearer()))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    public void deleteWithoutTokenReturnsUnauthorized() throws Exception {
+        Student saved = saveStudent("Alice", "Martin", "alice@example.com");
+
+        mockMvc.perform(delete(URL + "/" + saved.getId()))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(studentRepository.existsById(saved.getId())).isTrue();
+    }
+
+    @Test
+    public void deleteWithMalformedTokenReturnsUnauthorized() throws Exception {
+        Student saved = saveStudent("Alice", "Martin", "alice@example.com");
+
+        mockMvc.perform(delete(URL + "/" + saved.getId()).header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt"))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(studentRepository.existsById(saved.getId())).isTrue();
+    }
+
+    @Test
+    public void deleteWithTokenSignedByAnotherKeyReturnsUnauthorized() throws Exception {
+        Student saved = saveStudent("Alice", "Martin", "alice@example.com");
+
+        mockMvc.perform(delete(URL + "/" + saved.getId()).header(HttpHeaders.AUTHORIZATION, bearerSignedWithOtherKey()))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(studentRepository.existsById(saved.getId())).isTrue();
     }
 }
