@@ -25,6 +25,24 @@ public class RestExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
 
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    @ExceptionHandler(value = {ResourceNotFoundException.class})
+    protected ResponseEntity<Object> handleResourceNotFoundException(ResourceNotFoundException resourceNotFoundException,
+                                                                     WebRequest request) {
+        logError(resourceNotFoundException);
+        return handleExceptionInternal(resourceNotFoundException, getErrorDetails(resourceNotFoundException, request),
+                new HttpHeaders(), HttpStatus.NOT_FOUND, request);
+    }
+
+    @ResponseStatus(HttpStatus.CONFLICT)
+    @ExceptionHandler(value = {EmailAlreadyUsedException.class})
+    protected ResponseEntity<Object> handleEmailAlreadyUsedException(EmailAlreadyUsedException emailAlreadyUsedException,
+                                                                     WebRequest request) {
+        logError(emailAlreadyUsedException);
+        return handleExceptionInternal(emailAlreadyUsedException, getErrorDetails(emailAlreadyUsedException, request),
+                new HttpHeaders(), HttpStatus.CONFLICT, request);
+    }
+
     @ResponseStatus(HttpStatus.UNAUTHORIZED)
     @ExceptionHandler(value = {BadCredentialsException.class})
     protected ResponseEntity<Object> handleBadCredentialsException(BadCredentialsException badCredentialsException,
